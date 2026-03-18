@@ -223,7 +223,7 @@ A：目前没有导出功能。你可以：
 ## 反馈与支持
 
 如果你遇到问题或有功能建议：
-- GitHub 仓库：https://github.com/CrystalCore/background-workshop
+- GitHub 仓库：https://github.com/CrystalCoreQwQ/background
 - 提交 Issue 时请附上：
   - 浏览器版本
   - Tampermonkey 版本
