@@ -1,0 +1,1017 @@
+// ==UserScript==
+// @name         通用背景板
+// @namespace    https://github.com/CrystalCoreQwQ/background
+// @version      1.0
+// @description  上传图片裁剪为网页背景，亮度/模糊可调（滑块控制），智能文字颜色，代码框永久透明，极致覆盖，支持每个网站单独设置，悬浮球双击展开/收缩
+// @author       CrystalCore
+// @match        *://*/*
+// @grant        GM_addStyle
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_getResourceText
+// @resource     cropperCSS https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.css
+// @require      https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.12/cropper.min.js
+// @license      MIT
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    if (window.top !== window.self) return;
+
+    // ---------- 加载Cropper样式 ----------
+    GM_addStyle(GM_getResourceText('cropperCSS'));
+
+    // ---------- 全局样式 ----------
+    GM_addStyle(`
+        /* 背景层 */
+        #bg-custom-layer {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            pointer-events: none !important;
+            z-index: -2147483648 !important;
+            background-repeat: no-repeat !important;
+            background-position: center !important;
+            background-size: cover !important;
+            transition: filter 0.15s;
+            background-color: transparent;
+            display: none;
+        }
+
+        /* ===== 代码框永久透明 ===== */
+        pre, code, .code, .syntax-highlighter, .hljs, .sh__code, .prettyprint, .source-code,
+        pre[class*="language-"], code[class*="language-"], .token, .highlight,
+        .sh_sourceCode, .sh_container, .sh_code_block, .katex, .md-fences,
+        .cm-s-default, .CodeMirror, .editor, .monaco-editor, .ace_editor,
+        .gatsby-highlight, .chroma, .highlight pre, .linenodiv pre {
+            background-color: transparent !important;
+            background: transparent !important;
+        }
+
+        /* ===== 基础透明（通用容器） ===== */
+        .main, .main-container, .container, .content, .article, .post, .page,
+        .card, .panel, .widget, .box, .section, .wrapper,
+        .luogu-main, .problem-card, .solution-card, .discussion-card,
+        .am-main, .am-card, .am-panel,
+        .comments, .comment-list, .comment-item,
+        .sidebar, .aside, .side,
+        .footer, .foot {
+            background-color: transparent !important;
+        }
+
+        /* ===== 极致透明模式（由类控制）===== */
+        .bg-extreme-transparent *:not(#bg-master-panel):not(#bg-master-panel *):not(#bg-custom-layer) {
+            background-color: transparent !important;
+            background-image: none !important;
+        }
+        .bg-extreme-transparent *::before,
+        .bg-extreme-transparent *::after {
+            background-color: transparent !important;
+            background-image: none !important;
+        }
+
+        /* ===== 环绕小球面板样式 ===== */
+        #bg-master-panel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 999999;
+            user-select: none;
+        }
+        #bg-center-ball {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: #2d7aff;
+            box-shadow: 0 6px 20px rgba(45,122,255,0.4);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: white;
+            position: relative;
+            z-index: 10;
+        }
+        #bg-orbit {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .bg-orbit-ball {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: #2d7aff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            pointer-events: auto;
+            opacity: 0;
+            transform: scale(0);
+            left: 50%;
+            top: 50%;
+            margin-left: -20px;
+            margin-top: -20px;
+        }
+        .bg-orbit-ball.show {
+            opacity: 1;
+            transform: scale(1);
+        }
+        .bg-orbit-ball:hover {
+            background: #2d7aff;
+            color: white;
+            transform: scale(1.1);
+        }
+        /* 提示框基础样式 */
+        .bg-orbit-ball::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+            z-index: 100;
+        }
+        .bg-orbit-ball::before {
+            content: '';
+            position: absolute;
+            border-width: 5px;
+            border-style: solid;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+        }
+        .bg-orbit-ball:hover::after,
+        .bg-orbit-ball:hover::before {
+            opacity: 1;
+        }
+        /* 提示方向 - 始终显示在远离中心的一侧 */
+        .bg-orbit-ball.tip-top::after {
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            margin-bottom: 6px;
+        }
+        .bg-orbit-ball.tip-top::before {
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border-color: transparent transparent rgba(0,0,0,0.8) transparent;
+            margin-bottom: -4px;
+        }
+        .bg-orbit-ball.tip-right::after {
+            left: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            margin-left: 6px;
+        }
+        .bg-orbit-ball.tip-right::before {
+            left: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            border-color: transparent transparent transparent rgba(0,0,0,0.8);
+            margin-left: -4px;
+        }
+        .bg-orbit-ball.tip-bottom::after {
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            margin-top: 6px;
+        }
+        .bg-orbit-ball.tip-bottom::before {
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border-color: rgba(0,0,0,0.8) transparent transparent transparent;
+            margin-top: -4px;
+        }
+        .bg-orbit-ball.tip-left::after {
+            right: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            margin-right: 6px;
+        }
+        .bg-orbit-ball.tip-left::before {
+            right: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            border-color: transparent rgba(0,0,0,0.8) transparent transparent;
+            margin-right: -4px;
+        }
+    `);
+
+    // ---------- 动态样式：用于控制html/body背景透明（仅在背景激活时生效）----------
+    const htmlBodyStyle = document.createElement('style');
+    htmlBodyStyle.id = 'bg-html-body-style';
+    htmlBodyStyle.textContent = `
+        .bg-active html, .bg-active body {
+            background-color: transparent !important;
+            background-image: none !important;
+        }
+    `;
+    document.head.appendChild(htmlBodyStyle);
+
+    // ---------- 存储结构 ----------
+    const STORE_KEY = 'bgSettingsV2';
+    const DEFAULT_DOMAIN = 'default';
+
+    function getCurrentDomain() {
+        return window.location.hostname;
+    }
+
+    function getAllSettings() {
+        let settings = GM_getValue(STORE_KEY, null);
+        if (!settings) {
+            const oldImage = GM_getValue('bgImageData', null);
+            const oldBright = GM_getValue('bgBrightness', 100);
+            const oldBlur = GM_getValue('bgBlur', 0);
+            const oldEnabled = GM_getValue('bgEnabled', true);
+            const oldTextColorMode = GM_getValue('bgTextColorMode', 'auto');
+            const oldExtremeMode = GM_getValue('bgExtremeMode', true);
+            if (oldImage !== null) {
+                settings = {
+                    [DEFAULT_DOMAIN]: {
+                        image: oldImage,
+                        bright: oldBright,
+                        blur: oldBlur,
+                        enabled: oldEnabled,
+                        textColorMode: oldTextColorMode,
+                        extremeMode: oldExtremeMode
+                    }
+                };
+                GM_setValue(STORE_KEY, settings);
+                ['bgImageData','bgBrightness','bgBlur','bgEnabled','bgTextColorMode','bgExtremeMode'].forEach(k => GM_setValue(k, null));
+                console.log('[背景] 已迁移旧版本设置');
+            } else {
+                settings = { [DEFAULT_DOMAIN]: {} };
+            }
+        }
+        return settings;
+    }
+
+    function saveAllSettings(settings) {
+        GM_setValue(STORE_KEY, settings);
+    }
+
+    function getCurrentSettings() {
+        const settings = getAllSettings();
+        const domain = getCurrentDomain();
+        const base = settings[domain] || settings[DEFAULT_DOMAIN] || {};
+        return {
+            image: base.image || null,
+            bright: base.bright !== undefined ? base.bright : 100,
+            blur: base.blur !== undefined ? base.blur : 0,
+            enabled: base.enabled !== undefined ? base.enabled : false,
+            textColorMode: base.textColorMode || 'auto',
+            extremeMode: base.extremeMode !== undefined ? base.extremeMode : true
+        };
+    }
+
+    function saveCurrentSettings(newSettings) {
+        const settings = getAllSettings();
+        const domain = getCurrentDomain();
+        settings[domain] = { ...(settings[domain] || {}), ...newSettings };
+        saveAllSettings(settings);
+        console.log(`[背景] 已保存设置到 ${domain}`, newSettings);
+    }
+
+    function setAsDefault() {
+        const current = getCurrentSettings();
+        const settings = getAllSettings();
+        settings[DEFAULT_DOMAIN] = current;
+        const domain = getCurrentDomain();
+        delete settings[domain];
+        saveAllSettings(settings);
+        loadSettingsToUI();
+        console.log('[背景] 已设为全局默认');
+    }
+
+    function applyToAllSites() {
+        const current = getCurrentSettings();
+        const settings = getAllSettings();
+        settings[DEFAULT_DOMAIN] = current;
+        Object.keys(settings).forEach(domain => {
+            if (domain !== DEFAULT_DOMAIN) {
+                settings[domain] = { ...current };
+            }
+        });
+        saveAllSettings(settings);
+        loadSettingsToUI();
+        console.log('[背景] 已应用到所有网站');
+    }
+
+    // ---------- 全局变量 ----------
+    let bgLayer = null;
+    let textColorStyle = null;
+    let currentTextColorMode = 'auto';
+    let extremeModeEnabled = true;
+    let backgroundEnabled = false;
+    let panelState = {
+        expanded: false,
+        left: null,
+        top: null
+    };
+    let isDragging = false;
+    let dragStarted = false;
+
+    // 环绕小球配置（已移除弹窗模糊按钮）
+    const orbitBalls = [
+        { icon: '📁', tooltip: '上传背景', action: 'upload' },
+        { icon: '☀️', tooltip: '调节亮度', action: 'brightness' },
+        { icon: '🌀', tooltip: '调节模糊', action: 'blur' },
+        { icon: '🎨', tooltip: '文字颜色', action: 'textColor' },
+        { icon: '🔮', tooltip: '极致透明', action: 'extremeToggle' },
+        { icon: '👁️', tooltip: '开关背景', action: 'toggleBackground' },
+        { icon: '⭐', tooltip: '设为全局默认', action: 'setDefault' },
+        { icon: '🌐', tooltip: '应用到所有', action: 'applyAll' }
+    ];
+
+    // ---------- 初始化 ----------
+    function init() {
+        if (document.getElementById('bg-master-panel')) return;
+
+        if (!document.getElementById('bg-custom-layer')) {
+            bgLayer = document.createElement('div');
+            bgLayer.id = 'bg-custom-layer';
+            document.documentElement.insertBefore(bgLayer, document.documentElement.firstChild);
+        } else {
+            bgLayer = document.getElementById('bg-custom-layer');
+        }
+
+        loadPanelState();
+
+        const panel = document.createElement('div');
+        panel.id = 'bg-master-panel';
+        if (panelState.left !== null && panelState.top !== null) {
+            panel.style.left = panelState.left + 'px';
+            panel.style.top = panelState.top + 'px';
+            panel.style.right = 'auto';
+        }
+
+        panel.innerHTML = `
+            <div id="bg-center-ball">🎨</div>
+            <div id="bg-orbit"></div>
+            <input type="file" id="bg-file-input" accept="image/*" style="display: none;">
+        `;
+        document.body.appendChild(panel);
+
+        // 创建环绕球
+        orbitBalls.forEach((ball, index) => {
+            const ballEl = document.createElement('div');
+            ballEl.className = 'bg-orbit-ball';
+            ballEl.setAttribute('data-tooltip', ball.tooltip);
+            ballEl.setAttribute('data-action', ball.action);
+            ballEl.textContent = ball.icon;
+            ballEl.style.display = 'none';
+            document.getElementById('bg-orbit').appendChild(ballEl);
+        });
+
+        loadSettingsToUI();
+        bindEvents(panel);
+
+        observeDOM();
+    }
+
+    function loadPanelState() {
+        const stored = GM_getValue('bgPanelState', null);
+        if (stored) panelState = stored;
+    }
+
+    function savePanelState() {
+        GM_setValue('bgPanelState', panelState);
+    }
+
+    // 展开/收缩动画，并设置提示方向（远离中心）
+    function expandPanel() {
+        if (panelState.expanded) return;
+        panelState.expanded = true;
+        savePanelState();
+
+        const orbit = document.getElementById('bg-orbit');
+        const balls = orbit.children;
+        for (let i = 0; i < balls.length; i++) {
+            balls[i].style.display = 'flex';
+            balls[i].style.opacity = '0';
+            balls[i].style.transform = 'scale(0)';
+            balls[i].style.left = '50%';
+            balls[i].style.top = '50%';
+            balls[i].classList.remove('tip-top', 'tip-right', 'tip-bottom', 'tip-left');
+        }
+
+        const radius = 100;
+        const count = balls.length;
+        const baseDelay = 50;
+
+        for (let i = 0; i < count; i++) {
+            const ball = balls[i];
+            const angle = (i / count) * 2 * Math.PI; // 弧度，0 指向正右方
+            const finalX = 50 + radius * Math.cos(angle) - 20;
+            const finalY = 50 + radius * Math.sin(angle) - 20;
+
+            // 根据角度确定提示方向（远离中心）
+            let deg = angle * 180 / Math.PI;
+            if (deg < 0) deg += 360;
+
+            if (deg >= 315 || deg < 45) {
+                ball.classList.add('tip-left');
+            } else if (deg >= 45 && deg < 135) {
+                ball.classList.add('tip-top');
+            } else if (deg >= 135 && deg < 225) {
+                ball.classList.add('tip-right');
+            } else {
+                ball.classList.add('tip-bottom');
+            }
+
+            setTimeout(() => {
+                ball.style.transition = 'all 0.3s cubic-bezier(0.68, -0.55, 0.27, 1.55)';
+                ball.style.opacity = '1';
+                ball.style.transform = 'scale(1)';
+                ball.style.left = finalX + 'px';
+                ball.style.top = finalY + 'px';
+            }, baseDelay * i);
+        }
+    }
+
+    function collapsePanel() {
+        if (!panelState.expanded) return;
+        panelState.expanded = false;
+        savePanelState();
+
+        const orbit = document.getElementById('bg-orbit');
+        const balls = orbit.children;
+        const count = balls.length;
+        const baseDelay = 50;
+
+        for (let i = count - 1; i >= 0; i--) {
+            const ball = balls[i];
+            setTimeout(() => {
+                ball.style.transition = 'all 0.2s ease';
+                ball.style.opacity = '0';
+                ball.style.transform = 'scale(0)';
+                ball.style.left = '50%';
+                ball.style.top = '50%';
+            }, baseDelay * (count - 1 - i));
+        }
+
+        setTimeout(() => {
+            for (let i = 0; i < balls.length; i++) {
+                balls[i].style.display = 'none';
+            }
+        }, baseDelay * count + 200);
+    }
+
+    function togglePanel() {
+        if (panelState.expanded) collapsePanel();
+        else expandPanel();
+    }
+
+    // 核心函数：根据当前设置更新UI
+    function loadSettingsToUI() {
+        const settings = getCurrentSettings();
+        const image = settings.image || null;
+        const enabled = settings.enabled;
+        const bright = settings.bright;
+        const blur = settings.blur;
+        const textMode = settings.textColorMode;
+        const extreme = settings.extremeMode;
+
+        window._bgBright = bright;
+        window._bgBlur = blur;
+        window._bgEnabled = enabled;
+        currentTextColorMode = textMode;
+        extremeModeEnabled = extreme;
+
+        if (image) {
+            bgLayer.style.backgroundImage = `url('${image}')`;
+        } else {
+            bgLayer.style.backgroundImage = 'none';
+        }
+
+        bgLayer.style.filter = `brightness(${bright}%) blur(${blur}px)`;
+
+        setBackgroundActive(enabled && !!image);
+    }
+
+    function setBackgroundActive(active) {
+        if (backgroundEnabled === active) return;
+
+        backgroundEnabled = active;
+        window._bgEnabled = active;
+
+        if (active) {
+            bgLayer.style.display = 'block';
+            document.documentElement.classList.add('bg-active');
+            if (extremeModeEnabled) {
+                document.documentElement.classList.add('bg-extreme-transparent');
+            } else {
+                document.documentElement.classList.remove('bg-extreme-transparent');
+            }
+            applyTextColor();
+        } else {
+            bgLayer.style.display = 'none';
+            document.documentElement.classList.remove('bg-active');
+            document.documentElement.classList.remove('bg-extreme-transparent');
+            if (textColorStyle) {
+                textColorStyle.remove();
+                textColorStyle = null;
+            }
+        }
+        saveCurrentUI();
+    }
+
+    function saveCurrentUI() {
+        let image = bgLayer.style.backgroundImage;
+        if (image && image !== 'none' && image.startsWith('url("')) {
+            image = image.slice(5, -2);
+        } else {
+            image = null;
+        }
+        const settings = {
+            image: image,
+            bright: window._bgBright !== undefined ? window._bgBright : 100,
+            blur: window._bgBlur !== undefined ? window._bgBlur : 0,
+            enabled: backgroundEnabled,
+            textColorMode: currentTextColorMode,
+            extremeMode: extremeModeEnabled
+        };
+        if (!settings.image) delete settings.image;
+        saveCurrentSettings(settings);
+    }
+
+    function applyFilter(bright, blur) {
+        window._bgBright = bright;
+        window._bgBlur = blur;
+        bgLayer.style.filter = `brightness(${bright}%) blur(${blur}px)`;
+        saveCurrentUI();
+    }
+
+    function updateFilterPreview(bright, blur) {
+        window._bgBright = bright;
+        window._bgBlur = blur;
+        bgLayer.style.filter = `brightness(${bright}%) blur(${blur}px)`;
+    }
+
+    function setTextColorMode(mode, save = true) {
+        currentTextColorMode = mode;
+        if (save) saveCurrentUI();
+        if (backgroundEnabled) {
+            applyTextColor();
+        }
+    }
+
+    async function applyTextColor() {
+        if (!backgroundEnabled) {
+            if (textColorStyle) {
+                textColorStyle.remove();
+                textColorStyle = null;
+            }
+            return;
+        }
+
+        if (currentTextColorMode === 'auto') {
+            const imgData = bgLayer.style.backgroundImage;
+            if (imgData && imgData !== 'none' && imgData.startsWith('url("')) {
+                const url = imgData.slice(5, -2);
+                const color = await analyzeImageBrightness(url);
+                setTextColorStyle(color);
+            } else {
+                if (textColorStyle) textColorStyle.remove();
+                textColorStyle = null;
+            }
+        } else {
+            const color = currentTextColorMode === 'white' ? '#ffffff' : '#000000';
+            setTextColorStyle(color);
+        }
+    }
+
+    function setTextColorStyle(color) {
+        if (textColorStyle) textColorStyle.remove();
+        textColorStyle = document.createElement('style');
+        textColorStyle.textContent = `
+            html body, html p, html h1, html h2, html h3, html h4, html h5, html h6,
+            html li, html a, html span, html div, html button, html input, html textarea,
+            html select, html option, html label, html td, html th, html caption,
+            html article, html section, html aside, html nav, html header, html footer {
+                color: ${color} !important;
+            }
+            html a {
+                color: ${color === '#000000' ? '#0066cc' : '#99ccff'} !important;
+            }
+        `;
+        document.head.appendChild(textColorStyle);
+    }
+
+    function analyzeImageBrightness(dataURL) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = function() {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+                const startX = Math.floor(img.width * 0.25);
+                const startY = Math.floor(img.height * 0.25);
+                const sampleWidth = Math.floor(img.width * 0.5);
+                const sampleHeight = Math.floor(img.height * 0.5);
+                const imageData = ctx.getImageData(startX, startY, sampleWidth, sampleHeight);
+                const data = imageData.data;
+                let sum = 0;
+                for (let i = 0; i < data.length; i += 4) {
+                    sum += data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+                }
+                const avg = sum / (sampleWidth * sampleHeight);
+                const textColor = avg > 128 ? '#000000' : '#ffffff';
+                resolve(textColor);
+            };
+            img.src = dataURL;
+        });
+    }
+
+    function observeDOM() {
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(mutation => {
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        if (node.matches && node.matches('pre, code, .code, .hljs, .sh__code, .sh_sourceCode')) {
+                            node.style.setProperty('background-color', 'transparent', 'important');
+                        }
+                        if (node.querySelectorAll) {
+                            node.querySelectorAll('pre, code, .code, .hljs, .sh__code, .sh_sourceCode').forEach(el => {
+                                el.style.setProperty('background-color', 'transparent', 'important');
+                            });
+                        }
+                    }
+                });
+            });
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    // 滑块控制弹窗
+    function showSlider(type) {
+        const existing = document.getElementById('bg-slider-modal');
+        if (existing) existing.remove();
+
+        const modal = document.createElement('div');
+        modal.id = 'bg-slider-modal';
+        modal.innerHTML = `
+            <div class="bg-slider-container">
+                <div class="bg-slider-header">${type === 'brightness' ? '亮度调节' : '模糊调节'}</div>
+                <div class="bg-slider-content">
+                    <input type="range" id="bg-slider-input" min="${type === 'brightness' ? 0 : 0}" max="${type === 'brightness' ? 200 : 20}" value="${type === 'brightness' ? (window._bgBright || 100) : (window._bgBlur || 0)}" step="1">
+                    <span id="bg-slider-value">${type === 'brightness' ? (window._bgBright || 100) : (window._bgBlur || 0)}</span>
+                </div>
+                <div class="bg-slider-actions">
+                    <button class="bg-slider-close">关闭</button>
+                </div>
+            </div>
+        `;
+
+        const style = document.createElement('style');
+        style.textContent = `
+            #bg-slider-modal {
+                position: fixed;
+                top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.3);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1000001;
+            }
+            #bg-slider-modal .bg-slider-container {
+                background: white;
+                border-radius: 12px;
+                padding: 20px;
+                min-width: 300px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            }
+            #bg-slider-modal .bg-slider-header {
+                font-size: 18px;
+                margin-bottom: 15px;
+                text-align: center;
+            }
+            #bg-slider-modal .bg-slider-content {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            #bg-slider-modal .bg-slider-content input {
+                flex: 1;
+            }
+            #bg-slider-modal .bg-slider-actions {
+                margin-top: 20px;
+                text-align: right;
+            }
+            #bg-slider-modal .bg-slider-actions button {
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                background: #2d7aff;
+                color: white;
+                cursor: pointer;
+            }
+        `;
+        modal.appendChild(style);
+        document.body.appendChild(modal);
+
+        const slider = modal.querySelector('#bg-slider-input');
+        const valueSpan = modal.querySelector('#bg-slider-value');
+
+        const updatePreview = () => {
+            const val = parseInt(slider.value, 10);
+            valueSpan.textContent = val;
+            if (type === 'brightness') {
+                updateFilterPreview(val, window._bgBlur || 0);
+            } else {
+                updateFilterPreview(window._bgBright || 100, val);
+            }
+        };
+
+        const saveValue = () => {
+            saveCurrentUI();
+        };
+
+        slider.addEventListener('input', updatePreview);
+        slider.addEventListener('change', saveValue);
+
+        const closeModal = () => {
+            saveValue();
+            modal.remove();
+        };
+
+        const closeBtn = modal.querySelector('.bg-slider-close');
+        closeBtn.addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal();
+        });
+    }
+
+    // 事件绑定
+    function bindEvents(panel) {
+        const centerBall = document.getElementById('bg-center-ball');
+        const orbit = document.getElementById('bg-orbit');
+        const fileInput = document.getElementById('bg-file-input');
+
+        let offsetX, offsetY;
+
+        function startDrag(e) {
+            if (e.target !== centerBall) return;
+            if (panelState.expanded) return;
+            isDragging = true;
+            dragStarted = false;
+            const rect = panel.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            centerBall.style.cursor = 'grabbing';
+            e.preventDefault();
+        }
+
+        function onDrag(e) {
+            if (!isDragging) return;
+            dragStarted = true;
+            let left = e.clientX - offsetX;
+            let top = e.clientY - offsetY;
+            left = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, left));
+            top = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, top));
+            panel.style.left = left + 'px';
+            panel.style.top = top + 'px';
+            panel.style.right = 'auto';
+            panelState.left = left;
+            panelState.top = top;
+        }
+
+        function stopDrag() {
+            if (isDragging) {
+                isDragging = false;
+                centerBall.style.cursor = 'pointer';
+                savePanelState();
+            }
+            dragStarted = false;
+        }
+
+        centerBall.addEventListener('mousedown', startDrag);
+        document.addEventListener('mousemove', onDrag);
+        document.addEventListener('mouseup', stopDrag);
+
+        centerBall.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            togglePanel();
+        });
+
+        orbit.addEventListener('click', (e) => {
+            const ball = e.target.closest('.bg-orbit-ball');
+            if (!ball) return;
+            const action = ball.getAttribute('data-action');
+            handleAction(action);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            showCropper(file);
+            e.target.value = '';
+        });
+
+        function handleAction(action) {
+            switch (action) {
+                case 'upload': fileInput.click(); break;
+                case 'brightness': showSlider('brightness'); break;
+                case 'blur': showSlider('blur'); break;
+                case 'textColor': cycleTextColor(); break;
+                case 'extremeToggle': toggleExtreme(); break;
+                case 'toggleBackground': toggleBackground(); break;
+                case 'setDefault':
+                    if (confirm('设为全局默认？')) setAsDefault();
+                    collapsePanel();
+                    break;
+                case 'applyAll':
+                    if (confirm('应用到所有网站？')) applyToAllSites();
+                    collapsePanel();
+                    break;
+            }
+        }
+
+        function cycleTextColor() {
+            const modes = ['auto', 'white', 'black'];
+            const currentIndex = modes.indexOf(currentTextColorMode);
+            const next = modes[(currentIndex + 1) % modes.length];
+            setTextColorMode(next, true);
+        }
+
+        function toggleExtreme() {
+            if (!backgroundEnabled) {
+                alert('请先开启背景功能');
+                return;
+            }
+            extremeModeEnabled = !extremeModeEnabled;
+            if (extremeModeEnabled) {
+                document.documentElement.classList.add('bg-extreme-transparent');
+            } else {
+                document.documentElement.classList.remove('bg-extreme-transparent');
+            }
+            saveCurrentUI();
+        }
+
+        function toggleBackground() {
+            const hasImage = bgLayer.style.backgroundImage && bgLayer.style.backgroundImage !== 'none';
+            if (!hasImage) {
+                alert('请先上传背景图片');
+                return;
+            }
+            const newState = !backgroundEnabled;
+            setBackgroundActive(newState);
+        }
+    }
+
+    // 裁剪上传
+    function showCropper(file) {
+        const modal = document.createElement('div');
+        modal.id = 'bg-cropper-modal';
+        modal.innerHTML = `
+            <div class="bg-cropper-container">
+                <div class="bg-cropper-header">✂️ 裁剪区域（比例锁定为当前窗口）</div>
+                <div class="bg-image-wrapper">
+                    <img id="bg-crop-image" src="">
+                </div>
+                <div class="bg-cropper-actions">
+                    <button class="bg-cancel-btn" id="bg-crop-cancel">取消</button>
+                    <button class="bg-confirm-btn" id="bg-crop-confirm">确认裁剪</button>
+                </div>
+            </div>
+        `;
+
+        const style = document.createElement('style');
+        style.textContent = `
+            #bg-cropper-modal {
+                position: fixed;
+                top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1000000;
+            }
+            #bg-cropper-modal .bg-cropper-container {
+                background: white;
+                border-radius: 8px;
+                padding: 20px;
+                max-width: 95vw;
+                max-height: 90vh;
+                display: flex;
+                flex-direction: column;
+            }
+            #bg-cropper-modal .bg-image-wrapper {
+                max-width: 80vw;
+                max-height: 60vh;
+            }
+            #bg-cropper-modal .bg-image-wrapper img {
+                max-width: 100%;
+                max-height: 100%;
+                display: block;
+            }
+            #bg-cropper-modal .bg-cropper-actions {
+                margin-top: 10px;
+                text-align: right;
+            }
+            #bg-cropper-modal .bg-cropper-actions button {
+                padding: 8px 16px;
+                margin-left: 8px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+            }
+            #bg-cropper-modal .bg-cancel-btn {
+                background: #f0f0f0;
+            }
+            #bg-cropper-modal .bg-confirm-btn {
+                background: #2d7aff;
+                color: white;
+            }
+        `;
+        modal.appendChild(style);
+
+        document.body.appendChild(modal);
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const imgSrc = e.target.result;
+            const img = document.getElementById('bg-crop-image');
+            img.src = imgSrc;
+            img.onload = () => {
+                const aspect = window.innerWidth / window.innerHeight;
+                const cropper = new Cropper(img, {
+                    aspectRatio: aspect,
+                    viewMode: 1,
+                    dragMode: 'move',
+                    autoCropArea: 0.8,
+                    cropBoxMovable: true,
+                    cropBoxResizable: true,
+                    background: false,
+                });
+
+                document.getElementById('bg-crop-confirm').addEventListener('click', async () => {
+                    const maxWidth = Math.min(2560, window.innerWidth * 2);
+                    const maxHeight = Math.round(maxWidth / aspect);
+                    const canvas = cropper.getCroppedCanvas({
+                        maxWidth: maxWidth,
+                        maxHeight: maxHeight,
+                        fillColor: '#fff',
+                        imageSmoothingQuality: 'high',
+                    });
+
+                    let quality = 0.95;
+                    let dataURL;
+                    do {
+                        dataURL = canvas.toDataURL('image/jpeg', quality);
+                        quality -= 0.05;
+                    } while (dataURL.length > 3_500_000 && quality > 0.6);
+
+                    bgLayer.style.backgroundImage = `url('${dataURL}')`;
+                    console.log('[背景] 新图片已应用，尺寸：', canvas.width, 'x', canvas.height);
+
+                    if (!backgroundEnabled) {
+                        setBackgroundActive(true);
+                    } else {
+                        if (currentTextColorMode === 'auto') {
+                            const color = await analyzeImageBrightness(dataURL);
+                            setTextColorStyle(color);
+                        }
+                    }
+
+                    modal.remove();
+                    cropper.destroy();
+                });
+
+                document.getElementById('bg-crop-cancel').addEventListener('click', () => {
+                    modal.remove();
+                    cropper.destroy();
+                });
+            };
+        };
+        reader.readAsDataURL(file);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
