@@ -21,14 +21,9 @@
     // ---------- 加载Cropper样式 ----------
     GM_addStyle(GM_getResourceText('cropperCSS'));
 
-    // ---------- 全局样式：背景层 + 代码框透明 + 极致透明 + 环绕小球面板 ----------
+    // ---------- 全局样式 ----------
     GM_addStyle(`
-        /* 彻底移除html和body的背景 */
-        html, body {
-            background-color: transparent !important;
-            background-image: none !important;
-        }
-        /* 背景层挂载在html下 */
+        /* 背景层 */
         #bg-custom-layer {
             position: fixed !important;
             top: 0 !important;
@@ -42,6 +37,7 @@
             background-size: cover !important;
             transition: filter 0.15s;
             background-color: transparent;
+            display: none; /* 默认隐藏，由JS控制 */
         }
 
         /* ===== 代码框永久透明 ===== */
@@ -65,7 +61,7 @@
             background-color: transparent !important;
         }
 
-        /* ===== 极致透明模式 ===== */
+        /* ===== 极致透明模式（由类控制）===== */
         .bg-extreme-transparent *:not(#bg-master-panel):not(#bg-master-panel *):not(#bg-custom-layer) {
             background-color: transparent !important;
             background-image: none !important;
@@ -84,7 +80,6 @@
             z-index: 999999;
             user-select: none;
         }
-        /* 中心球 */
         #bg-center-ball {
             width: 56px;
             height: 56px;
@@ -100,7 +95,6 @@
             position: relative;
             z-index: 10;
         }
-        /* 环绕小球容器 */
         #bg-orbit {
             position: absolute;
             top: 0;
@@ -109,7 +103,6 @@
             height: 100%;
             pointer-events: none;
         }
-        /* 单个环绕球 */
         .bg-orbit-ball {
             position: absolute;
             width: 40px;
@@ -141,7 +134,6 @@
             color: white;
             transform: scale(1.1);
         }
-        /* 工具提示 - 显示在下方，避免遮挡 */
         .bg-orbit-ball::after {
             content: attr(data-tooltip);
             position: absolute;
@@ -180,7 +172,6 @@
         .bg-orbit-ball:hover::before {
             opacity: 1;
         }
-        /* 更多面板 */
         #bg-more-panel {
             position: absolute;
             top: 60px;
@@ -210,6 +201,17 @@
             color: white;
         }
     `);
+
+    // ---------- 动态样式：用于控制html/body背景透明（仅在背景激活时生效）----------
+    const htmlBodyStyle = document.createElement('style');
+    htmlBodyStyle.id = 'bg-html-body-style';
+    htmlBodyStyle.textContent = `
+        .bg-active html, .bg-active body {
+            background-color: transparent !important;
+            background-image: none !important;
+        }
+    `;
+    document.head.appendChild(htmlBodyStyle);
 
     // ---------- 存储结构 ----------
     const STORE_KEY = 'bgSettingsV2';
@@ -310,7 +312,8 @@
     let bgLayer = null;
     let textColorStyle = null;
     let currentTextColorMode = 'auto';
-    let extremeModeEnabled = true;
+    let extremeModeEnabled = true;   // 存储当前极致透明状态（仅当背景激活时有效）
+    let backgroundEnabled = false;   // 当前背景功能是否激活
     let panelState = {
         expanded: false,
         left: null,
@@ -319,7 +322,7 @@
     let isDragging = false;
     let dragStarted = false;
 
-    // 环绕小球配置
+    // 环绕小球配置（新增开关按钮）
     const orbitBalls = [
         { icon: '📁', tooltip: '上传背景', action: 'upload' },
         { icon: '☀️+', tooltip: '亮度 +10%', action: 'brightUp' },
@@ -328,6 +331,7 @@
         { icon: '🌀-', tooltip: '模糊 -1', action: 'blurDown' },
         { icon: '🎨', tooltip: '文字颜色', action: 'textColor' },
         { icon: '🔮', tooltip: '极致透明', action: 'extremeToggle' },
+        { icon: '👁️', tooltip: '开关背景', action: 'toggleBackground' },  // 新增开关
         { icon: '⚙️', tooltip: '更多', action: 'more' }
     ];
 
@@ -401,7 +405,7 @@
         GM_setValue('bgPanelState', panelState);
     }
 
-    // 展开动画
+    // 展开/收缩动画
     function expandPanel() {
         if (panelState.expanded) return;
         panelState.expanded = true;
@@ -437,7 +441,6 @@
         }
     }
 
-    // 收缩动画
     function collapsePanel() {
         if (!panelState.expanded) return;
         panelState.expanded = false;
@@ -473,29 +476,75 @@
         else expandPanel();
     }
 
+    // 核心函数：根据当前设置更新UI（背景层、html/body类、极致透明类、文字颜色）
     function loadSettingsToUI() {
         const settings = getCurrentSettings();
         const image = settings.image || null;
-        if (image) bgLayer.style.backgroundImage = `url('${image}')`;
-        else bgLayer.style.backgroundImage = 'none';
-
-        window._bgBright = settings.bright !== undefined ? settings.bright : 100;
-        window._bgBlur = settings.blur !== undefined ? settings.blur : 0;
-        window._bgEnabled = settings.enabled !== undefined ? settings.enabled : true;
-        applyFilter(window._bgBright, window._bgBlur);
-
+        const enabled = settings.enabled !== undefined ? settings.enabled : false; // 若无图片，强制为false（稍后处理）
+        const bright = settings.bright !== undefined ? settings.bright : 100;
+        const blur = settings.blur !== undefined ? settings.blur : 0;
         const textMode = settings.textColorMode || 'auto';
-        setTextColorMode(textMode, false);
-
         const extreme = settings.extremeMode !== undefined ? settings.extremeMode : true;
-        if (extreme) {
-            document.documentElement.classList.add('bg-extreme-transparent');
+
+        // 如果没有图片，则强制禁用背景
+        const hasImage = !!image;
+        const shouldEnable = hasImage && enabled;
+
+        // 更新全局变量
+        window._bgBright = bright;
+        window._bgBlur = blur;
+        window._bgEnabled = shouldEnable;
+        currentTextColorMode = textMode;
+        extremeModeEnabled = extreme; // 保存设置，但只在背景激活时应用
+
+        // 应用背景图片（即使未激活，也保存图片URL以便后续启用）
+        if (image) {
+            bgLayer.style.backgroundImage = `url('${image}')`;
         } else {
-            document.documentElement.classList.remove('bg-extreme-transparent');
+            bgLayer.style.backgroundImage = 'none';
         }
-        extremeModeEnabled = extreme;
+
+        // 应用滤镜（即使未激活，也保存以便启用后使用）
+        bgLayer.style.filter = `brightness(${bright}%) blur(${blur}px)`;
+
+        // 根据shouldEnable更新界面
+        setBackgroundActive(shouldEnable);
     }
 
+    // 设置背景激活状态
+    function setBackgroundActive(active) {
+        if (backgroundEnabled === active) return;
+
+        backgroundEnabled = active;
+        window._bgEnabled = active;
+
+        if (active) {
+            // 有图片才激活，但调用此函数前应确保有图片
+            bgLayer.style.display = 'block';
+            document.documentElement.classList.add('bg-active'); // 启用html/body透明
+            // 根据存储的极致透明设置添加类
+            if (extremeModeEnabled) {
+                document.documentElement.classList.add('bg-extreme-transparent');
+            } else {
+                document.documentElement.classList.remove('bg-extreme-transparent');
+            }
+            // 应用文字颜色
+            applyTextColor();
+        } else {
+            bgLayer.style.display = 'none';
+            document.documentElement.classList.remove('bg-active'); // 恢复html/body原始背景
+            document.documentElement.classList.remove('bg-extreme-transparent'); // 关闭极致透明
+            // 移除文字颜色样式
+            if (textColorStyle) {
+                textColorStyle.remove();
+                textColorStyle = null;
+            }
+        }
+        // 保存状态
+        saveCurrentUI();
+    }
+
+    // 保存当前UI到存储
     function saveCurrentUI() {
         let image = bgLayer.style.backgroundImage;
         if (image && image !== 'none' && image.startsWith('url("')) {
@@ -507,7 +556,7 @@
             image: image,
             bright: window._bgBright !== undefined ? window._bgBright : 100,
             blur: window._bgBlur !== undefined ? window._bgBlur : 0,
-            enabled: window._bgEnabled !== undefined ? window._bgEnabled : true,
+            enabled: backgroundEnabled, // 使用当前激活状态
             textColorMode: currentTextColorMode,
             extremeMode: extremeModeEnabled
         };
@@ -515,34 +564,53 @@
         saveCurrentSettings(settings);
     }
 
+    // 应用滤镜（仅当背景激活时有效，但保存值）
     function applyFilter(bright, blur) {
-        if (bgLayer) bgLayer.style.filter = `brightness(${bright}%) blur(${blur}px)`;
+        window._bgBright = bright;
+        window._bgBlur = blur;
+        bgLayer.style.filter = `brightness(${bright}%) blur(${blur}px)`;
+        if (backgroundEnabled) {
+            // 背景激活时实时更新
+        }
+        saveCurrentUI();
     }
 
+    // 设置文字颜色模式
     function setTextColorMode(mode, save = true) {
         currentTextColorMode = mode;
         if (save) saveCurrentUI();
-        applyTextColor();
+        if (backgroundEnabled) {
+            applyTextColor();
+        }
     }
 
+    // 应用文字颜色（根据模式计算）
     async function applyTextColor() {
+        if (!backgroundEnabled) {
+            if (textColorStyle) {
+                textColorStyle.remove();
+                textColorStyle = null;
+            }
+            return;
+        }
+
         if (currentTextColorMode === 'auto') {
             const imgData = bgLayer.style.backgroundImage;
             if (imgData && imgData !== 'none' && imgData.startsWith('url("')) {
                 const url = imgData.slice(5, -2);
                 const color = await analyzeImageBrightness(url);
-                setTextColor(color);
+                setTextColorStyle(color);
             } else {
                 if (textColorStyle) textColorStyle.remove();
                 textColorStyle = null;
             }
         } else {
             const color = currentTextColorMode === 'white' ? '#ffffff' : '#000000';
-            setTextColor(color);
+            setTextColorStyle(color);
         }
     }
 
-    function setTextColor(color) {
+    function setTextColorStyle(color) {
         if (textColorStyle) textColorStyle.remove();
         textColorStyle = document.createElement('style');
         textColorStyle.textContent = `
@@ -586,6 +654,7 @@
         });
     }
 
+    // 强制代码框透明（手动触发）
     function forceCodeTransparent() {
         document.querySelectorAll('pre, code, .code, .hljs, .sh__code, .sh_sourceCode').forEach(el => {
             el.style.setProperty('background', 'transparent', 'important');
@@ -593,6 +662,7 @@
         });
     }
 
+    // 监听动态添加的代码框
     function observeDOM() {
         const observer = new MutationObserver((mutations) => {
             mutations.forEach(mutation => {
@@ -613,6 +683,7 @@
         observer.observe(document.body, { childList: true, subtree: true });
     }
 
+    // 事件绑定
     function bindEvents(panel) {
         const centerBall = document.getElementById('bg-center-ball');
         const orbit = document.getElementById('bg-orbit');
@@ -653,20 +724,18 @@
                 centerBall.style.cursor = 'pointer';
                 savePanelState();
             }
-            dragStarted = false; // 重置拖拽标记
+            dragStarted = false;
         }
 
         centerBall.addEventListener('mousedown', startDrag);
         document.addEventListener('mousemove', onDrag);
         document.addEventListener('mouseup', stopDrag);
 
-        // 双击中心球切换展开/收缩
         centerBall.addEventListener('dblclick', (e) => {
             e.stopPropagation();
             togglePanel();
         });
 
-        // 点击事件委托（提高响应速度）
         orbit.addEventListener('click', (e) => {
             const ball = e.target.closest('.bg-orbit-ball');
             if (!ball) return;
@@ -681,7 +750,6 @@
             handleAction(action);
         });
 
-        // 点击外部关闭更多面板
         document.addEventListener('click', (e) => {
             if (!morePanel.contains(e.target) && !e.target.closest('[data-action="more"]')) {
                 morePanel.style.display = 'none';
@@ -704,6 +772,7 @@
                 case 'blurDown': adjustBlur(-1); break;
                 case 'textColor': cycleTextColor(); break;
                 case 'extremeToggle': toggleExtreme(); break;
+                case 'toggleBackground': toggleBackground(); break;  // 新增开关
                 case 'more': toggleMorePanel(); break;
                 case 'setDefault': if (confirm('设为全局默认？')) setAsDefault(); morePanel.style.display = 'none'; break;
                 case 'applyAll': if (confirm('应用到所有网站？')) applyToAllSites(); morePanel.style.display = 'none'; break;
@@ -715,17 +784,13 @@
         function adjustBrightness(delta) {
             let bright = window._bgBright || 100;
             bright = Math.min(200, Math.max(0, bright + delta));
-            window._bgBright = bright;
             applyFilter(bright, window._bgBlur || 0);
-            saveCurrentUI();
         }
 
         function adjustBlur(delta) {
             let blur = window._bgBlur || 0;
             blur = Math.min(20, Math.max(0, blur + delta));
-            window._bgBlur = blur;
             applyFilter(window._bgBright || 100, blur);
-            saveCurrentUI();
         }
 
         function cycleTextColor() {
@@ -736,6 +801,10 @@
         }
 
         function toggleExtreme() {
+            if (!backgroundEnabled) {
+                alert('请先开启背景功能');
+                return;
+            }
             extremeModeEnabled = !extremeModeEnabled;
             if (extremeModeEnabled) {
                 document.documentElement.classList.add('bg-extreme-transparent');
@@ -743,6 +812,17 @@
                 document.documentElement.classList.remove('bg-extreme-transparent');
             }
             saveCurrentUI();
+        }
+
+        // 新增背景开关
+        function toggleBackground() {
+            const hasImage = bgLayer.style.backgroundImage && bgLayer.style.backgroundImage !== 'none';
+            if (!hasImage) {
+                alert('请先上传背景图片');
+                return;
+            }
+            const newState = !backgroundEnabled;
+            setBackgroundActive(newState);
         }
 
         function toggleMorePanel() {
@@ -754,6 +834,7 @@
         }
     }
 
+    // 裁剪上传
     function showCropper(file) {
         const modal = document.createElement('div');
         modal.id = 'bg-cropper-modal';
@@ -769,6 +850,57 @@
                 </div>
             </div>
         `;
+
+        const style = document.createElement('style');
+        style.textContent = `
+            #bg-cropper-modal {
+                position: fixed;
+                top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1000000;
+            }
+            #bg-cropper-modal .bg-cropper-container {
+                background: white;
+                border-radius: 8px;
+                padding: 20px;
+                max-width: 95vw;
+                max-height: 90vh;
+                display: flex;
+                flex-direction: column;
+            }
+            #bg-cropper-modal .bg-image-wrapper {
+                max-width: 80vw;
+                max-height: 60vh;
+            }
+            #bg-cropper-modal .bg-image-wrapper img {
+                max-width: 100%;
+                max-height: 100%;
+                display: block;
+            }
+            #bg-cropper-modal .bg-cropper-actions {
+                margin-top: 10px;
+                text-align: right;
+            }
+            #bg-cropper-modal .bg-cropper-actions button {
+                padding: 8px 16px;
+                margin-left: 8px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+            }
+            #bg-cropper-modal .bg-cancel-btn {
+                background: #f0f0f0;
+            }
+            #bg-cropper-modal .bg-confirm-btn {
+                background: #2d7aff;
+                color: white;
+            }
+        `;
+        modal.appendChild(style);
+
         document.body.appendChild(modal);
 
         const reader = new FileReader();
@@ -808,13 +940,16 @@
                     bgLayer.style.backgroundImage = `url('${dataURL}')`;
                     console.log('[背景] 新图片已应用，尺寸：', canvas.width, 'x', canvas.height);
 
-                    if (currentTextColorMode === 'auto') {
-                        const color = await analyzeImageBrightness(dataURL);
-                        setTextColor(color);
+                    // 上传后自动启用背景
+                    if (!backgroundEnabled) {
+                        setBackgroundActive(true);
+                    } else {
+                        // 如果已经启用，重新应用文字颜色（可能因图片变化）
+                        if (currentTextColorMode === 'auto') {
+                            const color = await analyzeImageBrightness(dataURL);
+                            setTextColorStyle(color);
+                        }
                     }
-
-                    window._bgEnabled = true;
-                    saveCurrentUI();
 
                     modal.remove();
                     cropper.destroy();
